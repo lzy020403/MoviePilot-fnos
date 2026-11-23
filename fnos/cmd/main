@@ -4,8 +4,9 @@
 LOG_FILE="${TRIM_PKGVAR}/app.log"
 PID_FILE="${TRIM_PKGVAR}/app.pid"
 APP_DIR="${TRIM_APPDEST}/server"
+RUNTIME_BIN="${TRIM_APPDEST}/runtime/python/bin"
 
-export PATH="/var/apps/python314/target/bin:${PATH}"
+export PATH="${RUNTIME_BIN}:${PATH}"
 
 # data-share order matches config/resource: config, core
 IFS=':' read -r CONFIG_DIR CORE_DIR _ <<EOF
@@ -21,6 +22,13 @@ export CLOAKBROWSER_CACHE_DIR="${CORE_DIR}"
 export NGINX_PORT="${TRIM_SERVICE_PORT:-3000}"
 export PORT="${MOVIEPILOT_API_PORT:-3001}"
 export TZ="${TZ:-Asia/Shanghai}"
+
+# python-build-standalone certs
+if [ -f "${TRIM_APPDEST}/runtime/python/lib/python3.14/site-packages/certifi/cacert.pem" ]; then
+  export SSL_CERT_FILE="${TRIM_APPDEST}/runtime/python/lib/python3.14/site-packages/certifi/cacert.pem"
+elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+  export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+fi
 
 log_msg() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
@@ -61,6 +69,11 @@ start_app() {
   if status_app; then
     return 0
   fi
+  if [ ! -x "${RUNTIME_BIN}/python3" ]; then
+    log_msg "bundled python missing at ${RUNTIME_BIN}"
+    echo "Bundled Python 3.14 missing. Rebuild the fpk." > "${TRIM_TEMP_LOGFILE}"
+    return 1
+  fi
   if [ ! -x "${APP_DIR}/venv/bin/python" ]; then
     log_msg "venv missing; run install_callback first"
     echo "Python venv not found. Reinstall the package." > "${TRIM_TEMP_LOGFILE}"
@@ -73,7 +86,6 @@ start_app() {
     echo "Failed to start MoviePilot; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
     return 1
   fi
-  # Best-effort pid capture for debugging; status uses CLI.
   pgrep -f "${APP_DIR}/venv/bin/python" | head -n 1 > "${PID_FILE}" 2>/dev/null || true
   return 0
 }

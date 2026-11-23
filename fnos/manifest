@@ -1,6 +1,6 @@
 appname=moviepilot
-version=0.1.1
-desc=MoviePilot native fnOS package (Python 3.14, local CLI, port 3000)
+version=0.1.3
+desc=MoviePilot native fnOS package with bundled Python 3.14 (port 3000)
 display_name=MoviePilot
 maintainer=lzy020403
 distributor=lzy020403
@@ -8,7 +8,6 @@ platform=x86
 desktop_uidir=ui
 desktop_applaunchname=moviepilot.main
 source=thirdparty
-install_dep_apps=python314
 os_min_version=1.1.3100
 service_port=3000
 checkport=true

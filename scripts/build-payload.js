@@ -1,17 +1,21 @@
 /**
- * Prepare fnos/app/server payload from the MoviePilot source tree.
+ * Prepare fnos/app/server payload from the MoviePilot source tree,
+ * and ensure bundled Linux Python 3.14 is under fnos/app/runtime.
  * Does not run fnpack (pack on fnOS via deploy-fnos.ps1).
  *
  * Env:
  *   SKIP_VERSION_BUMP=1  keep manifest version
+ *   SKIP_PYTHON_FETCH=1  reuse existing bundled runtime
  */
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 
 const root = path.join(__dirname, "..");
 const packDir = path.join(root, "fnos");
 const serverDir = path.join(packDir, "app", "server");
 const manifestPath = path.join(packDir, "manifest");
+const stagedPythonTar = path.join(packDir, "app", "runtime", "python.tgz");
 
 const INCLUDE = [
   "app",
@@ -102,6 +106,24 @@ function copyFiltered(src, dest) {
 
 console.log("==> bump manifest");
 bumpManifest();
+
+console.log("==> stage bundled Python 3.14 tarball (extract on fnOS)");
+try {
+  execSync("node scripts/fetch-python-runtime.js", {
+    cwd: root,
+    stdio: "inherit",
+    shell: true,
+    env: process.env
+  });
+} catch (err) {
+  console.warn(
+    "==> local python stage failed; deploy will download on fnOS before fnpack"
+  );
+  console.warn(String(err && err.message ? err.message : err));
+}
+if (!fs.existsSync(stagedPythonTar)) {
+  console.warn("==> python.tgz not staged yet:", stagedPythonTar);
+}
 
 console.log("==> assemble fnos/app/server");
 emptyDir(serverDir);

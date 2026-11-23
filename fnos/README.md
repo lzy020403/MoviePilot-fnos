@@ -2,6 +2,12 @@
 
 飞牛原生 FPK 打包层。上游 MoviePilot 源码保持不动；本目录只放 manifest / 生命周期脚本 / UI 入口。
 
+## 运行时
+
+包内自带 **Python 3.14**（astral `python-build-standalone`，linux x86_64），**不依赖**飞牛应用中心的 `python314`。
+
+构建时由 `scripts/fetch-python-runtime.js` 下载到 `fnos/app/runtime/python/`（gitignore，不进仓库）。
+
 ## 构建
 
 在仓库根目录（`moviepilot-fnos/`）：
@@ -10,12 +16,7 @@
 .\scripts\deploy-fnos.ps1
 ```
 
-流程：本机 `scripts/build-payload.js` 组装 `fnos/app/server` → SSH 上传 → 飞牛机 `fnpack --nosign`。
-
-## 安装依赖
-
-- `python314`（manifest `install_dep_apps`）
-- 安装回调会用官方 `moviepilot install deps|frontend`（需外网拉依赖/前端）
+流程：拉 Python 运行时 → 组装 `fnos/app/server` → SSH 上传 → 飞牛机 `fnpack --nosign`。
 
 ## 访问
 

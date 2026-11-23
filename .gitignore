@@ -37,6 +37,8 @@ moviepilot-site-capture-*.zip
 # fnOS native pack build artifacts (main branch)
 fnos/app/server/*
 !fnos/app/server/.gitkeep
+fnos/app/runtime/
+.runtime-cache/
 moviepilot.fpk
 *.fpk
 

@@ -1,21 +1,27 @@
 #!/bin/bash
-# After install: create venv with python314 + uv, install deps and frontend.
+# After install: create venv with bundled Python 3.14 + uv, install deps and frontend.
 
 set -euo pipefail
 
 LOG_FILE="${TRIM_PKGVAR}/install.log"
 APP_DIR="${TRIM_APPDEST}/server"
+RUNTIME_BIN="${TRIM_APPDEST}/runtime/python/bin"
+PYTHON_BIN="${RUNTIME_BIN}/python3"
 mkdir -p "${TRIM_PKGVAR}"
 
 log_msg() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "${LOG_FILE}"
 }
 
-export PATH="/var/apps/python314/target/bin:${PATH}"
+export PATH="${RUNTIME_BIN}:${PATH}"
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python314 runtime not found at /var/apps/python314" > "${TRIM_TEMP_LOGFILE}"
+if [ ! -x "${PYTHON_BIN}" ]; then
+  echo "Bundled Python missing at ${PYTHON_BIN}" > "${TRIM_TEMP_LOGFILE}"
   exit 1
+fi
+
+if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+  export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 fi
 
 IFS=':' read -r CONFIG_DIR CORE_DIR _ <<EOF
@@ -39,8 +45,9 @@ fi
 cd "${APP_DIR}"
 chmod +x ./moviepilot 2>/dev/null || true
 chmod +x ./scripts/*.sh 2>/dev/null || true
+chmod -R a+rX "${TRIM_APPDEST}/runtime/python" 2>/dev/null || true
+chmod +x "${PYTHON_BIN}" "${RUNTIME_BIN}/"* 2>/dev/null || true
 
-# Prefer project uv if present; otherwise install a user-local uv via official installer script.
 ensure_uv() {
   if command -v uv >/dev/null 2>&1; then
     return 0
@@ -55,7 +62,7 @@ ensure_uv() {
   command -v uv >/dev/null 2>&1
 }
 
-log_msg "Python: $(python3 --version 2>&1)"
+log_msg "Python: $("${PYTHON_BIN}" --version 2>&1)"
 if ! ensure_uv; then
   echo "Failed to install uv" > "${TRIM_TEMP_LOGFILE}"
   exit 1
@@ -72,7 +79,7 @@ TZ=${TZ}
 EOF
 
 log_msg "Installing Python dependencies (moviepilot install deps)..."
-if ! ./moviepilot install deps --python "$(command -v python3)" >> "${LOG_FILE}" 2>&1; then
+if ! ./moviepilot install deps --python "${PYTHON_BIN}" >> "${LOG_FILE}" 2>&1; then
   log_msg "install deps failed; see ${LOG_FILE}"
   echo "Dependency install failed; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
   exit 1
@@ -85,7 +92,6 @@ if ! ./moviepilot install frontend --config-dir "${CONFIG_DIR}" >> "${LOG_FILE}"
   exit 1
 fi
 
-# Resources are optional for first boot; do not fail hard if network is limited.
 log_msg "Installing resources (best effort)..."
 ./moviepilot install resources --config-dir "${CONFIG_DIR}" >> "${LOG_FILE}" 2>&1 || \
   log_msg "resources install skipped/failed (non-fatal)"
