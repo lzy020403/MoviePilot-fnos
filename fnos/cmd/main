@@ -1,20 +1,30 @@
 #!/bin/bash
 # MoviePilot lifecycle: start / stop / status via upstream CLI.
 
-LOG_FILE="${TRIM_PKGVAR}/app.log"
-PID_FILE="${TRIM_PKGVAR}/app.pid"
+LOG_FILE="${TRIM_PKGVAR:-/tmp}/app.log"
+PID_FILE="${TRIM_PKGVAR:-/tmp}/app.pid"
 APP_DIR="${TRIM_APPDEST}/server"
 RUNTIME_BIN="${TRIM_APPDEST}/runtime/python/bin"
+PYTHON_BIN="${RUNTIME_BIN}/python3"
+BOOTSTRAP_FLAG="${TRIM_PKGVAR:-/tmp}/needs_bootstrap"
 
 export PATH="${RUNTIME_BIN}:${PATH}"
+export HOME="${HOME:-${TRIM_PKGVAR:-/tmp}}"
 
 # data-share order matches config/resource: config, core
-IFS=':' read -r CONFIG_DIR CORE_DIR _ <<EOF
-${TRIM_DATA_SHARE_PATHS}
-EOF
-CONFIG_DIR="${CONFIG_DIR:-${TRIM_PKGVAR}/config}"
-CORE_DIR="${CORE_DIR:-${TRIM_PKGVAR}/core}"
-mkdir -p "${CONFIG_DIR}" "${CORE_DIR}" "${TRIM_PKGVAR}"
+SHARE_PATHS="${TRIM_DATA_SHARE_PATHS:-}"
+CONFIG_DIR="${SHARE_PATHS%%:*}"
+if [ -z "${CONFIG_DIR}" ]; then
+  CONFIG_DIR="${TRIM_PKGVAR:-/tmp}/config"
+  CORE_DIR="${TRIM_PKGVAR:-/tmp}/core"
+elif [ "${SHARE_PATHS#*:}" = "${SHARE_PATHS}" ]; then
+  CORE_DIR="${TRIM_PKGVAR:-/tmp}/core"
+else
+  REST="${SHARE_PATHS#*:}"
+  CORE_DIR="${REST%%:*}"
+  [ -z "${CORE_DIR}" ] && CORE_DIR="${TRIM_PKGVAR:-/tmp}/core"
+fi
+mkdir -p "${CONFIG_DIR}" "${CORE_DIR}" "${TRIM_PKGVAR:-/tmp}"
 
 export CONFIG_DIR
 export MOVIEPILOT_CONFIG_DIR="${CONFIG_DIR}"
@@ -23,20 +33,16 @@ export NGINX_PORT="${TRIM_SERVICE_PORT:-3000}"
 export PORT="${MOVIEPILOT_API_PORT:-3001}"
 export TZ="${TZ:-Asia/Shanghai}"
 
-# python-build-standalone certs
-if [ -f "${TRIM_APPDEST}/runtime/python/lib/python3.14/site-packages/certifi/cacert.pem" ]; then
-  export SSL_CERT_FILE="${TRIM_APPDEST}/runtime/python/lib/python3.14/site-packages/certifi/cacert.pem"
-elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
   export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 fi
 
 log_msg() {
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}" 2>/dev/null || true
 }
 
 ensure_env_file() {
-  local env_file="${APP_DIR}/.moviepilot.env"
-  cat > "${env_file}" <<EOF
+  cat > "${APP_DIR}/.moviepilot.env" <<EOF
 CONFIG_DIR=${CONFIG_DIR}
 MOVIEPILOT_CONFIG_DIR=${CONFIG_DIR}
 CLOAKBROWSER_CACHE_DIR=${CORE_DIR}
@@ -46,10 +52,59 @@ TZ=${TZ}
 EOF
 }
 
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ -x "${HOME}/.local/bin/uv" ]; then
+    export PATH="${HOME}/.local/bin:${PATH}"
+    return 0
+  fi
+  log_msg "Installing uv..."
+  curl -fsSL https://astral.sh/uv/install.sh | sh >> "${LOG_FILE}" 2>&1 || return 1
+  export PATH="${HOME}/.local/bin:${PATH}"
+  command -v uv >/dev/null 2>&1
+}
+
+bootstrap_if_needed() {
+  if [ -x "${APP_DIR}/venv/bin/python" ] && [ ! -f "${BOOTSTRAP_FLAG}" ]; then
+    return 0
+  fi
+  if [ ! -x "${PYTHON_BIN}" ]; then
+    log_msg "bundled python missing"
+    echo "Bundled Python 3.14 missing" > "${TRIM_TEMP_LOGFILE:-/tmp/moviepilot.err}"
+    return 1
+  fi
+  log_msg "Bootstrapping MoviePilot deps (first start)..."
+  ensure_env_file
+  if ! ensure_uv; then
+    log_msg "uv install failed"
+    echo "Failed to install uv; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE:-/tmp/moviepilot.err}"
+    return 1
+  fi
+  cd "${APP_DIR}" || return 1
+  chmod +x ./moviepilot 2>/dev/null || true
+  if ! ./moviepilot install deps --python "${PYTHON_BIN}" >> "${LOG_FILE}" 2>&1; then
+    log_msg "install deps failed"
+    echo "Dependency install failed; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE:-/tmp/moviepilot.err}"
+    return 1
+  fi
+  if ! ./moviepilot install frontend --config-dir "${CONFIG_DIR}" >> "${LOG_FILE}" 2>&1; then
+    log_msg "frontend install failed"
+    echo "Frontend install failed; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE:-/tmp/moviepilot.err}"
+    return 1
+  fi
+  ./moviepilot install resources --config-dir "${CONFIG_DIR}" >> "${LOG_FILE}" 2>&1 || \
+    log_msg "resources install skipped/failed (non-fatal)"
+  rm -f "${BOOTSTRAP_FLAG}"
+  log_msg "Bootstrap finished"
+  return 0
+}
+
 mp_cli() {
   if [ ! -x "${APP_DIR}/moviepilot" ]; then
     log_msg "missing ${APP_DIR}/moviepilot"
-    echo "MoviePilot payload missing under app/server" > "${TRIM_TEMP_LOGFILE}"
+    echo "MoviePilot payload missing under app/server" > "${TRIM_TEMP_LOGFILE:-/tmp/moviepilot.err}"
     return 1
   fi
   (cd "${APP_DIR}" && ./moviepilot "$@")
@@ -69,21 +124,19 @@ start_app() {
   if status_app; then
     return 0
   fi
-  if [ ! -x "${RUNTIME_BIN}/python3" ]; then
-    log_msg "bundled python missing at ${RUNTIME_BIN}"
-    echo "Bundled Python 3.14 missing. Rebuild the fpk." > "${TRIM_TEMP_LOGFILE}"
+  if ! bootstrap_if_needed; then
     return 1
   fi
   if [ ! -x "${APP_DIR}/venv/bin/python" ]; then
-    log_msg "venv missing; run install_callback first"
-    echo "Python venv not found. Reinstall the package." > "${TRIM_TEMP_LOGFILE}"
+    log_msg "venv still missing after bootstrap"
+    echo "Python venv not found after bootstrap; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE:-/tmp/moviepilot.err}"
     return 1
   fi
   ensure_env_file
   log_msg "Starting MoviePilot (web=${NGINX_PORT} api=${PORT})..."
   if ! mp_cli start >> "${LOG_FILE}" 2>&1; then
     log_msg "moviepilot start failed"
-    echo "Failed to start MoviePilot; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
+    echo "Failed to start MoviePilot; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE:-/tmp/moviepilot.err}"
     return 1
   fi
   pgrep -f "${APP_DIR}/venv/bin/python" | head -n 1 > "${PID_FILE}" 2>/dev/null || true
@@ -113,7 +166,7 @@ case "$1" in
     exit 3
     ;;
   *)
-    echo "Unknown command: $1" > "${TRIM_TEMP_LOGFILE}"
+    echo "Unknown command: $1" > "${TRIM_TEMP_LOGFILE:-/tmp/moviepilot.err}"
     exit 1
     ;;
 esac

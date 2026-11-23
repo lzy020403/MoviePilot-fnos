@@ -1,73 +1,54 @@
 #!/bin/bash
-# After install: create venv with bundled Python 3.14 + uv, install deps and frontend.
+# Keep install fast: only verify payload + bundled Python and prepare dirs.
+# Heavy deps/frontend install happens on first start (see cmd/main).
 
-set -euo pipefail
-
-LOG_FILE="${TRIM_PKGVAR}/install.log"
+LOG_FILE="${TRIM_PKGVAR:-/tmp}/install.log"
 APP_DIR="${TRIM_APPDEST}/server"
 RUNTIME_BIN="${TRIM_APPDEST}/runtime/python/bin"
 PYTHON_BIN="${RUNTIME_BIN}/python3"
-mkdir -p "${TRIM_PKGVAR}"
+
+mkdir -p "${TRIM_PKGVAR:-/tmp}" 2>/dev/null || true
 
 log_msg() {
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "${LOG_FILE}"
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}" 2>/dev/null || true
 }
-
-export PATH="${RUNTIME_BIN}:${PATH}"
 
 if [ ! -x "${PYTHON_BIN}" ]; then
-  echo "Bundled Python missing at ${PYTHON_BIN}" > "${TRIM_TEMP_LOGFILE}"
+  msg="Bundled Python missing at ${PYTHON_BIN}"
+  log_msg "${msg}"
+  echo "${msg}" > "${TRIM_TEMP_LOGFILE:-/tmp/moviepilot-install.err}"
   exit 1
 fi
-
-if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-  export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-fi
-
-IFS=':' read -r CONFIG_DIR CORE_DIR _ <<EOF
-${TRIM_DATA_SHARE_PATHS}
-EOF
-CONFIG_DIR="${CONFIG_DIR:-${TRIM_PKGVAR}/config}"
-CORE_DIR="${CORE_DIR:-${TRIM_PKGVAR}/core}"
-mkdir -p "${CONFIG_DIR}" "${CORE_DIR}"
-
-export CONFIG_DIR
-export MOVIEPILOT_CONFIG_DIR="${CONFIG_DIR}"
-export CLOAKBROWSER_CACHE_DIR="${CORE_DIR}"
-export TZ="${TZ:-Asia/Shanghai}"
 
 if [ ! -f "${APP_DIR}/pyproject.toml" ] || [ ! -x "${APP_DIR}/moviepilot" ]; then
-  log_msg "payload incomplete under ${APP_DIR}"
-  echo "MoviePilot server payload missing. Rebuild the fpk with scripts/build-payload." > "${TRIM_TEMP_LOGFILE}"
+  msg="MoviePilot server payload missing under ${APP_DIR}"
+  log_msg "${msg}"
+  echo "${msg}" > "${TRIM_TEMP_LOGFILE:-/tmp/moviepilot-install.err}"
   exit 1
 fi
 
-cd "${APP_DIR}"
-chmod +x ./moviepilot 2>/dev/null || true
-chmod +x ./scripts/*.sh 2>/dev/null || true
+# data-share paths may be empty during some install phases
+SHARE_PATHS="${TRIM_DATA_SHARE_PATHS:-}"
+CONFIG_DIR="${SHARE_PATHS%%:*}"
+if [ -z "${CONFIG_DIR}" ] || [ "${CONFIG_DIR}" = "${SHARE_PATHS}" ]; then
+  # single path or empty
+  if [ -n "${SHARE_PATHS}" ] && [ "${SHARE_PATHS#*:}" = "${SHARE_PATHS}" ]; then
+    CONFIG_DIR="${SHARE_PATHS}"
+    CORE_DIR="${TRIM_PKGVAR:-/tmp}/core"
+  else
+    CONFIG_DIR="${TRIM_PKGVAR:-/tmp}/config"
+    CORE_DIR="${TRIM_PKGVAR:-/tmp}/core"
+  fi
+else
+  REST="${SHARE_PATHS#*:}"
+  CORE_DIR="${REST%%:*}"
+fi
+[ -z "${CORE_DIR}" ] && CORE_DIR="${TRIM_PKGVAR:-/tmp}/core"
+
+mkdir -p "${CONFIG_DIR}" "${CORE_DIR}" 2>/dev/null || true
+chmod +x "${APP_DIR}/moviepilot" 2>/dev/null || true
+chmod +x "${PYTHON_BIN}" 2>/dev/null || true
 chmod -R a+rX "${TRIM_APPDEST}/runtime/python" 2>/dev/null || true
-chmod +x "${PYTHON_BIN}" "${RUNTIME_BIN}/"* 2>/dev/null || true
-
-ensure_uv() {
-  if command -v uv >/dev/null 2>&1; then
-    return 0
-  fi
-  if [ -x "${HOME}/.local/bin/uv" ]; then
-    export PATH="${HOME}/.local/bin:${PATH}"
-    return 0
-  fi
-  log_msg "Installing uv..."
-  curl -fsSL https://astral.sh/uv/install.sh | sh >> "${LOG_FILE}" 2>&1
-  export PATH="${HOME}/.local/bin:${PATH}"
-  command -v uv >/dev/null 2>&1
-}
-
-log_msg "Python: $("${PYTHON_BIN}" --version 2>&1)"
-if ! ensure_uv; then
-  echo "Failed to install uv" > "${TRIM_TEMP_LOGFILE}"
-  exit 1
-fi
-log_msg "uv: $(uv --version 2>&1)"
 
 cat > "${APP_DIR}/.moviepilot.env" <<EOF
 CONFIG_DIR=${CONFIG_DIR}
@@ -75,26 +56,10 @@ MOVIEPILOT_CONFIG_DIR=${CONFIG_DIR}
 CLOAKBROWSER_CACHE_DIR=${CORE_DIR}
 NGINX_PORT=${TRIM_SERVICE_PORT:-3000}
 PORT=${MOVIEPILOT_API_PORT:-3001}
-TZ=${TZ}
+TZ=${TZ:-Asia/Shanghai}
 EOF
 
-log_msg "Installing Python dependencies (moviepilot install deps)..."
-if ! ./moviepilot install deps --python "${PYTHON_BIN}" >> "${LOG_FILE}" 2>&1; then
-  log_msg "install deps failed; see ${LOG_FILE}"
-  echo "Dependency install failed; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
-  exit 1
-fi
-
-log_msg "Installing frontend dist..."
-if ! ./moviepilot install frontend --config-dir "${CONFIG_DIR}" >> "${LOG_FILE}" 2>&1; then
-  log_msg "frontend install failed; see ${LOG_FILE}"
-  echo "Frontend install failed; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
-  exit 1
-fi
-
-log_msg "Installing resources (best effort)..."
-./moviepilot install resources --config-dir "${CONFIG_DIR}" >> "${LOG_FILE}" 2>&1 || \
-  log_msg "resources install skipped/failed (non-fatal)"
-
-log_msg "Install callback finished"
+# Mark that bootstrap is still needed on first start.
+touch "${TRIM_PKGVAR:-/tmp}/needs_bootstrap" 2>/dev/null || true
+log_msg "Install callback OK (python=$("${PYTHON_BIN}" --version 2>&1)); deps deferred to first start"
 exit 0

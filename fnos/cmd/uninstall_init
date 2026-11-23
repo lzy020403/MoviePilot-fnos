@@ -2,6 +2,7 @@
 ### Stop service before uninstall.
 APP_DIR="${TRIM_APPDEST}/server"
 RUNTIME_BIN="${TRIM_APPDEST}/runtime/python/bin"
+export HOME="${HOME:-${TRIM_PKGVAR:-/tmp}}"
 if [ -x "${TRIM_APPCMD}/main" ]; then
   "${TRIM_APPCMD}/main" stop || true
 elif [ -x "${APP_DIR}/moviepilot" ]; then
