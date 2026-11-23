@@ -1,0 +1,3 @@
+fnos/cmd/** text eol=lf
+fnos/manifest text eol=lf
+scripts/**/*.sh text eol=lf
