@@ -1,0 +1,107 @@
+#!/bin/bash
+# MoviePilot lifecycle: start / stop / status via upstream CLI.
+
+LOG_FILE="${TRIM_PKGVAR}/app.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+APP_DIR="${TRIM_APPDEST}/server"
+
+export PATH="/var/apps/python314/target/bin:${PATH}"
+
+# data-share order matches config/resource: config, core
+IFS=':' read -r CONFIG_DIR CORE_DIR _ <<EOF
+${TRIM_DATA_SHARE_PATHS}
+EOF
+CONFIG_DIR="${CONFIG_DIR:-${TRIM_PKGVAR}/config}"
+CORE_DIR="${CORE_DIR:-${TRIM_PKGVAR}/core}"
+mkdir -p "${CONFIG_DIR}" "${CORE_DIR}" "${TRIM_PKGVAR}"
+
+export CONFIG_DIR
+export MOVIEPILOT_CONFIG_DIR="${CONFIG_DIR}"
+export CLOAKBROWSER_CACHE_DIR="${CORE_DIR}"
+export NGINX_PORT="${TRIM_SERVICE_PORT:-3000}"
+export PORT="${MOVIEPILOT_API_PORT:-3001}"
+export TZ="${TZ:-Asia/Shanghai}"
+
+log_msg() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
+}
+
+ensure_env_file() {
+  local env_file="${APP_DIR}/.moviepilot.env"
+  cat > "${env_file}" <<EOF
+CONFIG_DIR=${CONFIG_DIR}
+MOVIEPILOT_CONFIG_DIR=${CONFIG_DIR}
+CLOAKBROWSER_CACHE_DIR=${CORE_DIR}
+NGINX_PORT=${NGINX_PORT}
+PORT=${PORT}
+TZ=${TZ}
+EOF
+}
+
+mp_cli() {
+  if [ ! -x "${APP_DIR}/moviepilot" ]; then
+    log_msg "missing ${APP_DIR}/moviepilot"
+    echo "MoviePilot payload missing under app/server" > "${TRIM_TEMP_LOGFILE}"
+    return 1
+  fi
+  (cd "${APP_DIR}" && ./moviepilot "$@")
+}
+
+status_app() {
+  if [ ! -x "${APP_DIR}/moviepilot" ]; then
+    return 1
+  fi
+  if (cd "${APP_DIR}" && ./moviepilot status) >> "${LOG_FILE}" 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+start_app() {
+  if status_app; then
+    return 0
+  fi
+  if [ ! -x "${APP_DIR}/venv/bin/python" ]; then
+    log_msg "venv missing; run install_callback first"
+    echo "Python venv not found. Reinstall the package." > "${TRIM_TEMP_LOGFILE}"
+    return 1
+  fi
+  ensure_env_file
+  log_msg "Starting MoviePilot (web=${NGINX_PORT} api=${PORT})..."
+  if ! mp_cli start >> "${LOG_FILE}" 2>&1; then
+    log_msg "moviepilot start failed"
+    echo "Failed to start MoviePilot; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
+    return 1
+  fi
+  # Best-effort pid capture for debugging; status uses CLI.
+  pgrep -f "${APP_DIR}/venv/bin/python" | head -n 1 > "${PID_FILE}" 2>/dev/null || true
+  return 0
+}
+
+stop_app() {
+  log_msg "Stopping MoviePilot..."
+  if [ -x "${APP_DIR}/moviepilot" ]; then
+    mp_cli stop >> "${LOG_FILE}" 2>&1 || true
+  fi
+  rm -f "${PID_FILE}"
+  return 0
+}
+
+case "$1" in
+  start)
+    start_app
+    ;;
+  stop)
+    stop_app
+    ;;
+  status)
+    if status_app; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    echo "Unknown command: $1" > "${TRIM_TEMP_LOGFILE}"
+    exit 1
+    ;;
+esac

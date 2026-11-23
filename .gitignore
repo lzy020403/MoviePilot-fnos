@@ -34,6 +34,13 @@ htmlcov/
 venv
 moviepilot-site-capture-*.zip
 
+# fnOS native pack build artifacts (main branch)
+fnos/app/server/**
+!fnos/app/server/.gitkeep
+moviepilot.fpk
+*.fpk
+
+
 # Pylint 检查报告与缓存
 pylint-report.json
 .pylint.d/

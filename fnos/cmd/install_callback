@@ -1,0 +1,94 @@
+#!/bin/bash
+# After install: create venv with python314 + uv, install deps and frontend.
+
+set -euo pipefail
+
+LOG_FILE="${TRIM_PKGVAR}/install.log"
+APP_DIR="${TRIM_APPDEST}/server"
+mkdir -p "${TRIM_PKGVAR}"
+
+log_msg() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "${LOG_FILE}"
+}
+
+export PATH="/var/apps/python314/target/bin:${PATH}"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python314 runtime not found at /var/apps/python314" > "${TRIM_TEMP_LOGFILE}"
+  exit 1
+fi
+
+IFS=':' read -r CONFIG_DIR CORE_DIR _ <<EOF
+${TRIM_DATA_SHARE_PATHS}
+EOF
+CONFIG_DIR="${CONFIG_DIR:-${TRIM_PKGVAR}/config}"
+CORE_DIR="${CORE_DIR:-${TRIM_PKGVAR}/core}"
+mkdir -p "${CONFIG_DIR}" "${CORE_DIR}"
+
+export CONFIG_DIR
+export MOVIEPILOT_CONFIG_DIR="${CONFIG_DIR}"
+export CLOAKBROWSER_CACHE_DIR="${CORE_DIR}"
+export TZ="${TZ:-Asia/Shanghai}"
+
+if [ ! -f "${APP_DIR}/pyproject.toml" ] || [ ! -x "${APP_DIR}/moviepilot" ]; then
+  log_msg "payload incomplete under ${APP_DIR}"
+  echo "MoviePilot server payload missing. Rebuild the fpk with scripts/build-payload." > "${TRIM_TEMP_LOGFILE}"
+  exit 1
+fi
+
+cd "${APP_DIR}"
+chmod +x ./moviepilot 2>/dev/null || true
+chmod +x ./scripts/*.sh 2>/dev/null || true
+
+# Prefer project uv if present; otherwise install a user-local uv via official installer script.
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ -x "${HOME}/.local/bin/uv" ]; then
+    export PATH="${HOME}/.local/bin:${PATH}"
+    return 0
+  fi
+  log_msg "Installing uv..."
+  curl -fsSL https://astral.sh/uv/install.sh | sh >> "${LOG_FILE}" 2>&1
+  export PATH="${HOME}/.local/bin:${PATH}"
+  command -v uv >/dev/null 2>&1
+}
+
+log_msg "Python: $(python3 --version 2>&1)"
+if ! ensure_uv; then
+  echo "Failed to install uv" > "${TRIM_TEMP_LOGFILE}"
+  exit 1
+fi
+log_msg "uv: $(uv --version 2>&1)"
+
+cat > "${APP_DIR}/.moviepilot.env" <<EOF
+CONFIG_DIR=${CONFIG_DIR}
+MOVIEPILOT_CONFIG_DIR=${CONFIG_DIR}
+CLOAKBROWSER_CACHE_DIR=${CORE_DIR}
+NGINX_PORT=${TRIM_SERVICE_PORT:-3000}
+PORT=${MOVIEPILOT_API_PORT:-3001}
+TZ=${TZ}
+EOF
+
+log_msg "Installing Python dependencies (moviepilot install deps)..."
+if ! ./moviepilot install deps --python "$(command -v python3)" >> "${LOG_FILE}" 2>&1; then
+  log_msg "install deps failed; see ${LOG_FILE}"
+  echo "Dependency install failed; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
+  exit 1
+fi
+
+log_msg "Installing frontend dist..."
+if ! ./moviepilot install frontend --config-dir "${CONFIG_DIR}" >> "${LOG_FILE}" 2>&1; then
+  log_msg "frontend install failed; see ${LOG_FILE}"
+  echo "Frontend install failed; see ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
+  exit 1
+fi
+
+# Resources are optional for first boot; do not fail hard if network is limited.
+log_msg "Installing resources (best effort)..."
+./moviepilot install resources --config-dir "${CONFIG_DIR}" >> "${LOG_FILE}" 2>&1 || \
+  log_msg "resources install skipped/failed (non-fatal)"
+
+log_msg "Install callback finished"
+exit 0

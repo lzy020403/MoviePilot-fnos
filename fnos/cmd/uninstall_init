@@ -1,0 +1,12 @@
+#!/bin/bash
+### Stop service before uninstall.
+APP_DIR="${TRIM_APPDEST}/server"
+if [ -x "${TRIM_APPCMD}/main" ]; then
+  "${TRIM_APPCMD}/main" stop || true
+elif [ -x "${APP_DIR}/moviepilot" ]; then
+  export PATH="/var/apps/python314/target/bin:${PATH}"
+  CONFIG_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+  export CONFIG_DIR
+  (cd "${APP_DIR}" && ./moviepilot stop) || true
+fi
+exit 0

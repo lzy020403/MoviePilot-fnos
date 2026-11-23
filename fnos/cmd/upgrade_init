@@ -1,0 +1,6 @@
+#!/bin/bash
+### Stop before upgrade so files can be replaced.
+if [ -x "${TRIM_APPCMD}/main" ]; then
+  "${TRIM_APPCMD}/main" stop || true
+fi
+exit 0

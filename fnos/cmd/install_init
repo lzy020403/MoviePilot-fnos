@@ -1,0 +1,3 @@
+#!/bin/bash
+### Called before the application is installed.
+exit 0
