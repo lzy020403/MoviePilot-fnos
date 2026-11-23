@@ -151,4 +151,53 @@ for (const name of required) {
   }
 }
 
+function stripCrInPlace(filePath) {
+  const buf = fs.readFileSync(filePath);
+  if (!buf.includes(0x0d)) return false;
+  fs.writeFileSync(filePath, Buffer.from(buf.filter((b) => b !== 0x0d)));
+  return true;
+}
+
+function stripCrTree(dir) {
+  let n = 0;
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, ent.name);
+    if (ent.isDirectory()) {
+      if (ent.name === "venv" || ent.name === "node_modules") continue;
+      n += stripCrTree(p);
+      continue;
+    }
+    const lower = ent.name.toLowerCase();
+    const looksShell =
+      lower === "moviepilot" ||
+      lower.endsWith(".sh") ||
+      lower.endsWith(".bash") ||
+      (!lower.includes(".") && ent.name === "moviepilot");
+    if (!looksShell) continue;
+    // Only rewrite if file starts with shebang
+    const fd = fs.openSync(p, "r");
+    const head = Buffer.alloc(2);
+    fs.readSync(fd, head, 0, 2, 0);
+    fs.closeSync(fd);
+    if (head.toString("utf8") !== "#!") continue;
+    if (stripCrInPlace(p)) n += 1;
+  }
+  return n;
+}
+
+console.log("==> strip CRLF from shell scripts in payload");
+const stripped = stripCrTree(serverDir);
+console.log(`  stripped ${stripped} files`);
+
+// Also ensure pack lifecycle scripts are LF (Windows checkout may reintroduce CR).
+const cmdDir = path.join(packDir, "cmd");
+if (fs.existsSync(cmdDir)) {
+  for (const name of fs.readdirSync(cmdDir)) {
+    const p = path.join(cmdDir, name);
+    if (fs.statSync(p).isFile() && stripCrInPlace(p)) {
+      console.log(`  stripped cmd/${name}`);
+    }
+  }
+}
+
 console.log("==> payload ready:", serverDir);
