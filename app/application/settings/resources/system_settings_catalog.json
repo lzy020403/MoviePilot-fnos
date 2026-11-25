@@ -767,7 +767,7 @@
       "source_file": "app/runtime/config.py"
     },
     "LLM_PROVIDER": {
-      "description": "LLM提供商（支持内置 provider，以及从 models.dev 动态补充的平台）",
+      "description": "LLM提供商（支持内置主流厂商及通用 OpenAI / Anthropic 兼容入口）",
       "group": "ai_agent",
       "source_file": "app/runtime/config.py"
     },
@@ -984,6 +984,11 @@
     "MUSIC_RENAME_FORMAT": {
       "description": "音乐重命名格式",
       "group": "transfer",
+      "source_file": "app/runtime/config.py"
+    },
+    "MUSIC_TRACK_MATCH": {
+      "description": "自动整理音乐专辑时的曲目对齐方式：strict 严格校验、fallback_ignore_duration 严格校验失败时回落忽略时长、ignore_duration 忽略时长校验",
+      "group": "music",
       "source_file": "app/runtime/config.py"
     },
     "NGINX_PORT": {
@@ -1206,6 +1211,11 @@
       "group": "sites",
       "source_file": "app/runtime/config.py"
     },
+    "SITE_USER_AGENT": {
+      "description": "站点默认User-Agent，站点未单独配置时使用；留空则使用全局默认User-Agent",
+      "group": "sites",
+      "source_file": "app/runtime/config.py"
+    },
     "SKILL_MARKET": {
       "description": "技能市场仓库地址，多个地址使用,分隔",
       "group": "skills",
@@ -1349,6 +1359,21 @@
     "USAGE_STATISTIC_SHARE": {
       "description": "安装版本统计上报",
       "group": "plugins",
+      "source_file": "app/runtime/config.py"
+    },
+    "VAPID_PRIVATE_KEY": {
+      "description": "Web Push VAPID 私钥（base64url 编码的 P-256 私钥），留空时使用运行期内置默认值；需与 VAPID_PUBLIC_KEY 成对配置",
+      "group": "security",
+      "source_file": "app/runtime/config.py"
+    },
+    "VAPID_PUBLIC_KEY": {
+      "description": "Web Push VAPID 公钥（base64url 编码的未压缩 P-256 公钥），留空时使用运行期内置默认值；需与 VAPID_PRIVATE_KEY 成对配置",
+      "group": "security",
+      "source_file": "app/runtime/config.py"
+    },
+    "VAPID_SUBJECT": {
+      "description": "Web Push VAPID 联系主体（mailto: 或 https:// 地址），留空时默认使用超级管理员邮箱地址",
+      "group": "security",
       "source_file": "app/runtime/config.py"
     },
     "WALLPAPER": {

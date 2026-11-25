@@ -58,7 +58,7 @@ class MessageResponse(BaseModel):
 
 class MessageHistoryItem(BaseModel):
     """
-    通知历史记录。
+    消息历史记录，覆盖各渠道接收的用户消息与系统发送的通知消息。
     """
 
     id: Optional[int] = Field(default=None, description="消息ID")
@@ -74,12 +74,6 @@ class MessageHistoryItem(BaseModel):
     reg_time: Optional[str] = Field(default=None, description="登记时间")
     action: Optional[int] = Field(default=None, description="消息方向：0-接收消息，1-发送消息")
     note: Optional[JsonData] = Field(default=None, description="附件json")
-
-
-class WebMessageItem(MessageHistoryItem):
-    """
-    Web 消息历史记录。
-    """
 
 
 class MessageClearData(BaseModel):
@@ -389,6 +383,14 @@ class Subscription(BaseModel):
 
     endpoint: Optional[str] = Field(default=None, description="请求端点地址")
     keys: Optional[dict[str, str]] = Field(default_factory=dict, description="推送订阅的加密公钥与认证密钥")
+
+
+class WebPushPublicKeyData(BaseModel):
+    """
+    浏览器 Web Push 订阅使用的 VAPID 公钥响应数据。
+    """
+
+    public_key: str = Field(description="base64url 编码的未压缩 P-256 VAPID 公钥")
 
 
 class SubscriptionMessage(BaseModel):

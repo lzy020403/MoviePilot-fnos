@@ -451,6 +451,56 @@ def test_strm_rejects_unconfigured_private_targets(tmp_path: Path, monkeypatch: 
     assert "192.168.1.15" not in str(error.value.detail)
 
 
+def test_local_strm_ticket_returns_client_direct_url_while_proxy_blocks_unconfigured_lan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    验证本地 STRM 文件票据向客户端返回无凭据 HTTP(S) 直链与同名字幕，同时服务端代理仍拦截未配置内网地址。
+    """
+    strm_file = tmp_path / "CloudMovie.strm"
+    strm_file.write_text("#EXTM3U\nhttp://192.168.1.15:5244/d/115/Cloud Movie.mkv\n", encoding="utf-8-sig")
+    (tmp_path / "CloudMovie.zh.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\n外挂字幕\n", encoding="utf-8")
+    credential_strm = tmp_path / "Secret.strm"
+    credential_strm.write_text("http://user:secret@192.168.1.15:5244/video.mkv\n", encoding="utf-8")
+
+    monkeypatch.setattr(mediastream, "get_runtime_setting", lambda _key: "test-resource-secret")
+    monkeypatch.setattr(mediaserver, "_ensure_manage_storage_item", lambda fileitem, _user: fileitem)
+    monkeypatch.setattr(
+        mediastream.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.15", 5244))],
+    )
+    current_user = SimpleNamespace(id=17, is_superuser=True, permissions={})
+    app = FastAPI()
+    app.include_router(mediaserver.router, prefix="/api/v1/mediaserver")
+    app.dependency_overrides[mediaserver.get_current_active_manage_user] = lambda: current_user
+    app.dependency_overrides[mediaserver.verify_token] = lambda: TokenPayload(sub=17)
+    app.dependency_overrides[mediaserver.verify_resource_token] = lambda: TokenPayload(sub=17)
+
+    with TestClient(app) as client:
+        ticket_resp = client.post(
+            "/api/v1/mediaserver/stream-ticket",
+            json={"file": {"storage": "local", "type": "file", "name": strm_file.name, "path": str(strm_file)}},
+        )
+        item_id = ticket_resp.json()["data"]["item_id"]
+        manifest_resp = client.get("/api/v1/mediaserver/stream-info", params={"itemid": item_id})
+        manifest = manifest_resp.json()["data"]
+        proxy_resp = client.get(manifest["content_url"])
+
+        cred_ticket = client.post(
+            "/api/v1/mediaserver/stream-ticket",
+            json={"file": {"storage": "local", "type": "file", "name": credential_strm.name, "path": str(credential_strm)}},
+        ).json()["data"]["item_id"]
+        cred_manifest_resp = client.get("/api/v1/mediaserver/stream-info", params={"itemid": cred_ticket})
+
+    assert manifest_resp.status_code == 200
+    assert manifest["strm_url"] == "http://192.168.1.15:5244/d/115/Cloud%20Movie.mkv"
+    assert len(manifest["subtitles"]) == 1
+    assert proxy_resp.status_code == 501
+    assert cred_manifest_resp.status_code == 501
+    assert "secret" not in cred_manifest_resp.text
+
+
 def test_configured_private_stream_host_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     """验证管理员配置过的私有媒体主机无需公网 DNS 也可作为 STRM 来源。"""
     hosts = mediastream._configured_stream_hosts(
@@ -635,7 +685,7 @@ def test_strm_rejects_upstream_without_range_support(monkeypatch: pytest.MonkeyP
 
 
 def test_media_server_search_endpoint_filters_types_and_caps_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """验证媒体库搜索只向服务模块分发电视剧和音乐类型。"""
+    """验证媒体库搜索向服务模块分发电影、电视剧和音乐类型并过滤无效类型。"""
     chain = Mock()
     chain.search_library.return_value = [
         MediaServerPlayItem(server="Emby-客厅", item_id="series-1", title="测试剧集", type="电视剧")
@@ -653,13 +703,14 @@ def test_media_server_search_endpoint_filters_types_and_caps_limit(monkeypatch: 
                 ("type", "电视剧"),
                 ("type", "电影"),
                 ("type", "音乐"),
+                ("type", "无效类型"),
                 ("limit", "45"),
             ],
         )
 
     assert response.status_code == 200
     assert response.json()["data"][0]["server"] == "Emby-客厅"
-    chain.search_library.assert_called_once_with("测试剧集", ["电视剧", "音乐"], 45)
+    chain.search_library.assert_called_once_with("测试剧集", ["电视剧", "电影", "音乐"], 45)
 
 
 def test_media_server_search_chain_deduplicates_per_server_and_signs_posters(monkeypatch: pytest.MonkeyPatch) -> None:
