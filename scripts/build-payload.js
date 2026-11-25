@@ -61,21 +61,8 @@ const EXCLUDE_DIR_NAMES = new Set([
 ]);
 
 function bumpManifest() {
-  if (process.env.SKIP_VERSION_BUMP === "1") {
-    console.log("==> SKIP_VERSION_BUMP=1");
-    return;
-  }
-  const text = fs.readFileSync(manifestPath, "utf8");
-  const m = text.match(/^version=(.+)$/m);
-  if (!m) throw new Error("manifest version not found");
-  const parts = m[1].trim().split(".").map((x) => Number(x));
-  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) {
-    throw new Error(`bad version: ${m[1]}`);
-  }
-  parts[2] += 1;
-  const next = parts.join(".");
-  fs.writeFileSync(manifestPath, text.replace(/^version=.*$/m, `version=${next}`));
-  console.log(`==> manifest version -> ${next}`);
+  // Delegate to bump-version.js ({upstream}-{iter} scheme).
+  require("./bump-version").bump();
 }
 
 function shouldSkip(src) {

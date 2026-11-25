@@ -1,6 +1,6 @@
 appname=moviepilot
-version=0.2.3
-desc=MoviePilot native fnOS: gateway SSO, user permissions, baked uv
+version=3.2.13-1
+desc=MoviePilot fnOS native FPK (upstream v3.2.13)
 display_name=MoviePilot
 maintainer=lzy020403
 distributor=lzy020403
